@@ -93,25 +93,13 @@ contract RatRouterForkTest is Test {
     function _deployCodeToRouter() internal {
         address poolManager = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
         vm.label(poolManager, "Uniswap PoolManager");
-        address uniswapV4Quoter = 0x0d5e0F971ED27FBfF6c2837bf31316121532048D;
-        vm.label(uniswapV4Quoter, "Uniswap V4 Quoter");
         // the newer one is 0xcbBb8035cAc7D4B3Ca7aBb74cF7BdF900215Ce0D but eurc pools use the legacy one
         address aerodromeRouter = 0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5;
         vm.label(aerodromeRouter, "legacy Aerodrome Router");
-        // the newer one is 0x3d4C22254F86f64B7eC90ab8F7aeC1FBFD271c6C but eurc pools use the legacy one
-        address aerodromeQuoter = 0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0;
-        vm.label(aerodromeQuoter, "legacy Aerodrome Quoter");
 
         deployCodeTo(
             "V4DeltaRouter.sol",
-            abi.encode(
-                permit2,
-                weth,
-                poolManager,
-                aerodromeRouter,
-                uniswapV4Quoter,
-                aerodromeQuoter
-            ),
+            abi.encode(permit2, weth, poolManager, aerodromeRouter),
             address(router)
         );
     }

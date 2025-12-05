@@ -34,9 +34,7 @@ contract V4DeltaRouter is
         address _permit2,
         address _weth,
         address _poolManager,
-        address _aerodromeRouter,
-        address _uniswapV4Quoter,
-        address _aerodromeQuoter
+        address _aerodromeRouter
     )
         BaseActionsRouter(IPoolManager(_poolManager))
         Permit2Forwarder(IAllowanceTransfer(_permit2))
