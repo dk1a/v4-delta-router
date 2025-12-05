@@ -1,0 +1,4 @@
+forge-std/=lib/forge-std/src/
+solmate/=lib/solmate/
+permit2/=lib/permit2/
+@uniswap/v4-periphery/=lib/v4-periphery/

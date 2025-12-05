@@ -1,0 +1,15 @@
+.DS_STORE
+.DS_Store
+.env
+.vscode
+
+node_modules/
+out/
+cache/
+dist/
+abi/
+types/
+broadcast/
+
+# Ignore local deploy artifacts
+deploys/31337/*.json

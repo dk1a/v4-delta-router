@@ -1,0 +1,28 @@
+{
+  "name": "@dk1a/v4-delta-router",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dk1a/v4-delta-router.git"
+  },
+  "scripts": {
+    "prepare": "husky install",
+    "build": "forge build",
+    "test": "forge test --fork-url=https://base-mainnet.g.alchemy.com/v2/o0Q1hppQS1CH1vqg63edZ --fork-block-number=38996950",
+    "format": "prettier --write"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.6.2",
+    "prettier-plugin-solidity": "^2.2.0"
+  },
+  "lint-staged": {
+    "*.{md,sol}": "prettier --write"
+  },
+  "engines": {
+    "node": "^20",
+    "pnpm": "^10"
+  },
+  "packageManager": "pnpm@10.18.0"
+}
