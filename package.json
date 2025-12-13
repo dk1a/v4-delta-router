@@ -8,7 +8,7 @@
   "scripts": {
     "prepare": "husky install",
     "build": "forge build",
-    "test": "forge test --fork-url=https://base-mainnet.g.alchemy.com/v2/o0Q1hppQS1CH1vqg63edZ --fork-block-number=38996950",
+    "test": "forge test --fork-url=https://base-mainnet.g.alchemy.com/v2/o0Q1hppQS1CH1vqg63edZ",
     "format": "prettier --write"
   },
   "devDependencies": {

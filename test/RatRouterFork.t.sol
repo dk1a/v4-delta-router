@@ -6,6 +6,7 @@ import { console } from "forge-std/console.sol";
 import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 
 import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import { PermitHash } from "permit2/src/libraries/PermitHash.sol";
 
 import { IHooks } from "@uniswap/v4-periphery/lib/v4-core/src/interfaces/IHooks.sol";
 import { PoolKey } from "@uniswap/v4-periphery/lib/v4-core/src/types/PoolKey.sol";
@@ -26,6 +27,14 @@ interface IDERC20BuyLimit is IERC20 {
     function setCountryCode(string calldata countryCode) external;
 }
 
+interface IDoppler {
+    function earlyExit() external view returns (bool);
+}
+
+interface IAirlock {
+    function migrate(address asset) external;
+}
+
 uint256 constant BASE_MAINNET_CHAIN_ID = 8453;
 
 // Base Mainnet fork tests
@@ -37,6 +46,9 @@ contract RatRouterForkTest is Test {
     V4DeltaRouter constant router =
         V4DeltaRouter(payable(address(bytes20(keccak256("router test address")))));
     IDERC20BuyLimit ratToken = IDERC20BuyLimit(0xf2DD384662411A21259ab17038574289091F2D41);
+
+    IAirlock airlock = IAirlock(0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12);
+    IDoppler dopplerHook = IDoppler(0x20A265758c73BCebEa0dc7eadA74DFB380C6f8e0);
 
     // random account with private key = 0x66476b9354ab18d457adaaa4236c169c0368a7c9b3fc926e5a54e82d0429864f
     address alice = 0x02435BA6eF2Df8163039D66283BFA03e12Bf624F;
@@ -191,18 +203,28 @@ contract RatRouterForkTest is Test {
         return abi.encode(actions, params);
     }
 
-    function _exactInDataBuy(
+    function _exactInDataBuyRatForEurc(
+        uint256 privateKey,
         uint128 amountIn,
         uint128 amountOutMinimum
     ) internal view returns (bytes memory) {
+        (
+            IAllowanceTransfer.PermitSingle memory permit,
+            bytes memory permitSignature
+        ) = _generatePermitAndSignature(privateKey, eurc, amountIn);
+
         bytes memory actions = abi.encodePacked(
+            uint8(Actions.PERMIT2_PERMIT),
+            uint8(Actions.PERMIT2_TRANSFER_FROM),
             uint8(Actions.SWAP_EXACT_IN_SINGLE),
             uint8(Actions.SETTLE),
             uint8(Actions.TAKE_ALL)
         );
 
-        bytes[] memory params = new bytes[](3);
-        params[0] = abi.encode(
+        bytes[] memory params = new bytes[](5);
+        params[0] = abi.encode(permit, permitSignature);
+        params[1] = abi.encode(eurc, ActionConstants.ADDRESS_THIS, amountIn);
+        params[2] = abi.encode(
             IV4Router.ExactInputSingleParams({
                 poolKey: poolKey,
                 zeroForOne: true,
@@ -211,24 +233,34 @@ contract RatRouterForkTest is Test {
                 hookData: ""
             })
         );
-        params[1] = abi.encode(eurc, ActionConstants.OPEN_DELTA, false);
-        params[2] = abi.encode(ratToken, 1);
+        params[3] = abi.encode(eurc, ActionConstants.OPEN_DELTA, false);
+        params[4] = abi.encode(ratToken, 1);
 
         return abi.encode(actions, params);
     }
 
-    function _exactInDataSell(
+    function _exactInDataSellRatForEurc(
+        uint256 privateKey,
         uint128 amountIn,
         uint128 amountOutMinimum
     ) internal view returns (bytes memory) {
+        (
+            IAllowanceTransfer.PermitSingle memory permit,
+            bytes memory permitSignature
+        ) = _generatePermitAndSignature(privateKey, address(ratToken), amountIn);
+
         bytes memory actions = abi.encodePacked(
+            uint8(Actions.PERMIT2_PERMIT),
+            uint8(Actions.PERMIT2_TRANSFER_FROM),
             uint8(Actions.SWAP_EXACT_IN_SINGLE),
             uint8(Actions.SETTLE),
             uint8(Actions.TAKE_ALL)
         );
 
-        bytes[] memory params = new bytes[](3);
-        params[0] = abi.encode(
+        bytes[] memory params = new bytes[](5);
+        params[0] = abi.encode(permit, permitSignature);
+        params[1] = abi.encode(ratToken, ActionConstants.ADDRESS_THIS, amountIn);
+        params[2] = abi.encode(
             IV4Router.ExactInputSingleParams({
                 poolKey: poolKey,
                 zeroForOne: false,
@@ -237,10 +269,44 @@ contract RatRouterForkTest is Test {
                 hookData: ""
             })
         );
-        params[1] = abi.encode(ratToken, ActionConstants.OPEN_DELTA, false);
-        params[2] = abi.encode(eurc, 1);
+        params[3] = abi.encode(ratToken, ActionConstants.OPEN_DELTA, false);
+        params[4] = abi.encode(eurc, 1);
 
         return abi.encode(actions, params);
+    }
+
+    function _generatePermitAndSignature(
+        uint256 privateKey,
+        address token,
+        uint160 amount
+    )
+        internal
+        view
+        returns (IAllowanceTransfer.PermitSingle memory permit, bytes memory signature)
+    {
+        address owner = vm.addr(privateKey);
+        (, , uint48 nonce) = IAllowanceTransfer(permit2).allowance(owner, token, address(router));
+
+        permit = IAllowanceTransfer.PermitSingle({
+            details: IAllowanceTransfer.PermitDetails({
+                token: token,
+                amount: amount,
+                expiration: type(uint48).max,
+                nonce: nonce
+            }),
+            spender: address(router),
+            sigDeadline: type(uint48).max
+        });
+
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                IAllowanceTransfer(permit2).DOMAIN_SEPARATOR(),
+                PermitHash.hash(permit)
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        signature = abi.encodePacked(r, s, v);
     }
 
     function _exactOutDataEth(
@@ -449,26 +515,85 @@ contract RatRouterForkTest is Test {
         router.execute{ value: 0.1 ether }(_exactInDataEth(0.1 ether, 0));
     }
 
-    function testSwapOn27th() public {
-        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
+    function _buySellLoop(
+        uint128 sellerAmountIn,
+        uint128 buyerAmountIn,
+        uint256 timeIncrement
+    ) internal {
+        uint256 iteration;
+        while (!dopplerHook.earlyExit()) {
+            iteration++;
+            vm.warp(block.timestamp + timeIncrement);
 
-        vm.startPrank(alice);
+            (address seller, uint256 sellerPk) = makeAddrAndKey(
+                string.concat("Seller ", vm.toString(iteration))
+            );
+            (address buyer, uint256 buyerPk) = makeAddrAndKey(
+                string.concat("Buyer ", vm.toString(iteration))
+            );
+
+            // Seller setup and permit
+            vm.startPrank(seller);
+            deal(address(ratToken), seller, sellerAmountIn);
+            IERC20(address(ratToken)).approve(permit2, type(uint256).max);
+            ratToken.setCountryCode("RU");
+
+            bytes memory sellData = _exactInDataSellRatForEurc(sellerPk, sellerAmountIn, 0);
+            router.execute(sellData);
+            vm.stopPrank();
+
+            // Buyer setup and permit
+            vm.startPrank(buyer);
+            deal(eurc, buyer, buyerAmountIn);
+            IERC20(eurc).approve(permit2, type(uint256).max);
+            ratToken.setCountryCode("RU");
+
+            bytes memory buyData = _exactInDataBuyRatForEurc(buyerPk, buyerAmountIn, 0);
+            router.execute(buyData);
+            assertApproxEqRel(ratToken.balanceOf(buyer), 60_000e18, 0.30e18);
+            vm.stopPrank();
+
+            require(iteration < 800, "earlyExit never reached");
+        }
+    }
+
+    function testSwapOn27thNormal() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
 
         vm.warp(1766804400);
 
-        deal(address(ratToken), alice, 1e26);
-        bytes memory sellData = _exactInDataSell(1000000e18, 15000e6);
-        router.execute(sellData);
+        uint128 sellerAmountIn = 10_000e18;
+        uint128 buyerAmountIn = 950e6;
+        _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
 
-        uint128 amountIn = 0.35 ether;
-        uint128 amountOutMinimum = 40_000e18;
-        deal(eurc, alice, amountIn);
-        ratToken.setCountryCode("RU");
+        assertTrue(dopplerHook.earlyExit());
+    }
 
-        router.execute{ value: amountIn }(_exactInDataEth(amountIn, amountOutMinimum));
+    function testSwapOn27thFastBuy() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
 
-        // At the start 0.344 ETH ~= 65_000 RAT
-        assertApproxEqRel(ratToken.balanceOf(alice), 50_000e18, 0.10e18);
-        assertEq(alice.balance, 0);
+        vm.warp(1766804400);
+
+        uint128 sellerAmountIn = 1_000e18;
+        uint128 buyerAmountIn = 950e6;
+        _buySellLoop(sellerAmountIn, buyerAmountIn, 1 minutes);
+
+        assertTrue(dopplerHook.earlyExit());
+
+        airlock.migrate(address(ratToken));
+        // Ensure deployer gets proceeds
+        assertGt(IERC20(eurc).balanceOf(0x987F4E0AE792C369EbF2D7441E10b1f3CC072124), 500_000e6);
+    }
+
+    function testSwapOn27thFastSell() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
+
+        vm.warp(1766804400);
+
+        uint128 sellerAmountIn = 1_000_000e18;
+        uint128 buyerAmountIn = 940e6;
+        _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
+
+        assertTrue(dopplerHook.earlyExit());
     }
 }
