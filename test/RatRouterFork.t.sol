@@ -191,6 +191,58 @@ contract RatRouterForkTest is Test {
         return abi.encode(actions, params);
     }
 
+    function _exactInDataBuy(
+        uint128 amountIn,
+        uint128 amountOutMinimum
+    ) internal view returns (bytes memory) {
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE),
+            uint8(Actions.TAKE_ALL)
+        );
+
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: true,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                hookData: ""
+            })
+        );
+        params[1] = abi.encode(eurc, ActionConstants.OPEN_DELTA, false);
+        params[2] = abi.encode(ratToken, 1);
+
+        return abi.encode(actions, params);
+    }
+
+    function _exactInDataSell(
+        uint128 amountIn,
+        uint128 amountOutMinimum
+    ) internal view returns (bytes memory) {
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE),
+            uint8(Actions.TAKE_ALL)
+        );
+
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: false,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                hookData: ""
+            })
+        );
+        params[1] = abi.encode(ratToken, ActionConstants.OPEN_DELTA, false);
+        params[2] = abi.encode(eurc, 1);
+
+        return abi.encode(actions, params);
+    }
+
     function _exactOutDataEth(
         uint128 amountOut,
         uint128 amountInMaximum
@@ -395,5 +447,28 @@ contract RatRouterForkTest is Test {
 
         vm.expectRevert();
         router.execute{ value: 0.1 ether }(_exactInDataEth(0.1 ether, 0));
+    }
+
+    function testSwapOn27th() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
+
+        vm.startPrank(alice);
+
+        vm.warp(1766804400);
+
+        deal(address(ratToken), alice, 1e26);
+        bytes memory sellData = _exactInDataSell(1000000e18, 15000e6);
+        router.execute(sellData);
+
+        uint128 amountIn = 0.35 ether;
+        uint128 amountOutMinimum = 40_000e18;
+        deal(eurc, alice, amountIn);
+        ratToken.setCountryCode("RU");
+
+        router.execute{ value: amountIn }(_exactInDataEth(amountIn, amountOutMinimum));
+
+        // At the start 0.344 ETH ~= 65_000 RAT
+        assertApproxEqRel(ratToken.balanceOf(alice), 50_000e18, 0.10e18);
+        assertEq(alice.balance, 0);
     }
 }
