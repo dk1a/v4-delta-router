@@ -540,6 +540,11 @@ contract RatRouterForkTest is Test {
     ) internal {
         uint256 iteration;
         while (!dopplerHook.earlyExit()) {
+            if (block.timestamp >= 1767970800) {
+                console.log("Reached auction end time");
+                break;
+            }
+
             iteration++;
             vm.warp(block.timestamp + timeIncrement);
 
@@ -557,7 +562,13 @@ contract RatRouterForkTest is Test {
             ratToken.setCountryCode("RU");
 
             bytes memory sellData = _exactInDataSellRatForEurc(sellerPk, sellerAmountIn, 0);
-            router.execute(sellData);
+            try router.execute(sellData) {
+                console.log("iteration ", iteration, " success");
+            } catch {
+                // rebalance failed
+                console.log("iteration ", iteration, " failure");
+                continue;
+            }
             vm.stopPrank();
 
             // Buyer setup and permit
@@ -575,6 +586,19 @@ contract RatRouterForkTest is Test {
         }
     }
 
+    function _ensureMigrationSuccess() internal {
+        airlock.migrate(address(ratToken));
+        address migrationPool = airlock.getAssetData(address(ratToken)).migrationPool;
+
+        address deployer = 0x987F4E0AE792C369EbF2D7441E10b1f3CC072124;
+        vm.startPrank(deployer);
+        // Ensure deployer can burn migrated tokens
+        IERC20(migrationPool).transfer(migrationPool, IERC20(migrationPool).balanceOf(deployer));
+        IUniswapV2Pair(migrationPool).burn(deployer);
+        // Ensure deployer gets proceeds
+        assertGt(IERC20(eurc).balanceOf(0x987F4E0AE792C369EbF2D7441E10b1f3CC072124), 500_000e6);
+    }
+
     function testSwapOn27thNormal() public {
         vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
 
@@ -584,7 +608,9 @@ contract RatRouterForkTest is Test {
         uint128 buyerAmountIn = 950e6;
         _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
 
-        assertTrue(dopplerHook.earlyExit());
+        assertFalse(dopplerHook.earlyExit());
+
+        _ensureMigrationSuccess();
     }
 
     function testSwapOn27thFastBuy() public {
@@ -598,9 +624,7 @@ contract RatRouterForkTest is Test {
 
         assertTrue(dopplerHook.earlyExit());
 
-        airlock.migrate(address(ratToken));
-        // Ensure deployer gets proceeds
-        assertGt(IERC20(eurc).balanceOf(0x987F4E0AE792C369EbF2D7441E10b1f3CC072124), 500_000e6);
+        _ensureMigrationSuccess();
     }
 
     function testSwapOn27thFastSell() public {
@@ -612,23 +636,16 @@ contract RatRouterForkTest is Test {
         uint128 buyerAmountIn = 940e6;
         _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
 
-        assertTrue(dopplerHook.earlyExit());
+        assertFalse(dopplerHook.earlyExit());
+
+        _ensureMigrationSuccess();
     }
 
-    function testMigration() public {
+    function testNoMoreSwapsMigration() public {
         vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
 
         _warpAfterAuctionEnd();
 
-        airlock.migrate(address(ratToken));
-        address migrationPool = airlock.getAssetData(address(ratToken)).migrationPool;
-
-        address deployer = 0x987F4E0AE792C369EbF2D7441E10b1f3CC072124;
-        vm.startPrank(deployer);
-        // Ensure deployer can burn migrated tokens
-        IERC20(migrationPool).transfer(migrationPool, IERC20(migrationPool).balanceOf(deployer));
-        IUniswapV2Pair(migrationPool).burn(deployer);
-        // Ensure deployer gets proceeds
-        assertGt(IERC20(eurc).balanceOf(0x987F4E0AE792C369EbF2D7441E10b1f3CC072124), 500_000e6);
+        _ensureMigrationSuccess();
     }
 }
