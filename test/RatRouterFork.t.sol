@@ -32,7 +32,25 @@ interface IDoppler {
 }
 
 interface IAirlock {
+    struct AssetData {
+        address numeraire;
+        address timelock;
+        address governance;
+        address liquidityMigrator;
+        address poolInitializer;
+        address pool;
+        address migrationPool;
+        uint256 numTokensToSell;
+        uint256 totalSupply;
+        address integrator;
+    }
+
     function migrate(address asset) external;
+    function getAssetData(address asset) external view returns (AssetData memory);
+}
+
+interface IUniswapV2Pair {
+    function burn(address to) external returns (uint256 amount0, uint256 amount1);
 }
 
 uint256 constant BASE_MAINNET_CHAIN_ID = 8453;
@@ -595,5 +613,22 @@ contract RatRouterForkTest is Test {
         _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
 
         assertTrue(dopplerHook.earlyExit());
+    }
+
+    function testMigration() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
+
+        _warpAfterAuctionEnd();
+
+        airlock.migrate(address(ratToken));
+        address migrationPool = airlock.getAssetData(address(ratToken)).migrationPool;
+
+        address deployer = 0x987F4E0AE792C369EbF2D7441E10b1f3CC072124;
+        vm.startPrank(deployer);
+        // Ensure deployer can burn migrated tokens
+        IERC20(migrationPool).transfer(migrationPool, IERC20(migrationPool).balanceOf(deployer));
+        IUniswapV2Pair(migrationPool).burn(deployer);
+        // Ensure deployer gets proceeds
+        assertGt(IERC20(eurc).balanceOf(0x987F4E0AE792C369EbF2D7441E10b1f3CC072124), 500_000e6);
     }
 }
