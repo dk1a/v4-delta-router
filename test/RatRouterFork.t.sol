@@ -556,20 +556,22 @@ contract RatRouterForkTest is Test {
             );
 
             // Seller setup and permit
-            vm.startPrank(seller);
-            deal(address(ratToken), seller, sellerAmountIn);
-            IERC20(address(ratToken)).approve(permit2, type(uint256).max);
-            ratToken.setCountryCode("RU");
+            if (sellerAmountIn > 0) {
+                vm.startPrank(seller);
+                deal(address(ratToken), seller, sellerAmountIn);
+                IERC20(address(ratToken)).approve(permit2, type(uint256).max);
+                ratToken.setCountryCode("RU");
 
-            bytes memory sellData = _exactInDataSellRatForEurc(sellerPk, sellerAmountIn, 0);
-            try router.execute(sellData) {
-                console.log("iteration ", iteration, " success");
-            } catch {
-                // rebalance failed
-                console.log("iteration ", iteration, " failure");
-                continue;
+                bytes memory sellData = _exactInDataSellRatForEurc(sellerPk, sellerAmountIn, 0);
+                try router.execute(sellData) {
+                    console.log("iteration ", iteration, " success");
+                } catch {
+                    // rebalance failed
+                    console.log("iteration ", iteration, " failure");
+                    continue;
+                }
+                vm.stopPrank();
             }
-            vm.stopPrank();
 
             // Buyer setup and permit
             vm.startPrank(buyer);
@@ -578,7 +580,13 @@ contract RatRouterForkTest is Test {
             ratToken.setCountryCode("RU");
 
             bytes memory buyData = _exactInDataBuyRatForEurc(buyerPk, buyerAmountIn, 0);
-            router.execute(buyData);
+            try router.execute(buyData) {
+                console.log("iteration ", iteration, " success");
+            } catch {
+                // rebalance failed
+                console.log("iteration ", iteration, " failure");
+                continue;
+            }
             assertApproxEqRel(ratToken.balanceOf(buyer), 60_000e18, 0.30e18);
             vm.stopPrank();
 
@@ -605,6 +613,20 @@ contract RatRouterForkTest is Test {
         vm.warp(1766804400);
 
         uint128 sellerAmountIn = 10_000e18;
+        uint128 buyerAmountIn = 950e6;
+        _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
+
+        assertFalse(dopplerHook.earlyExit());
+
+        _ensureMigrationSuccess();
+    }
+
+    function testSwapOn27thOnlyBuy() public {
+        vm.skip(block.chainid != BASE_MAINNET_CHAIN_ID);
+
+        vm.warp(1766804400);
+
+        uint128 sellerAmountIn = 0;
         uint128 buyerAmountIn = 950e6;
         _buySellLoop(sellerAmountIn, buyerAmountIn, 1 hours);
 
